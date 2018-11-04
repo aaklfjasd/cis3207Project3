@@ -1,0 +1,23 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include "logQ.h"
+
+
+node * newNode(){
+  node * nuNode = malloc(sizeof(node));
+  if(nuNode == NULL){
+    printf("unable to allocate memory for new node\n");
+  }
+  return nuNode;
+}
+LogQ * newLogQ(){
+  LogQ * newQ = malloc(sizeof(LogQ));
+  newQ->size = 0;
+  return newQ;
+}
+
+int addJob(char * logEntry){
+  //get lock
+  
+  return 1;
+}

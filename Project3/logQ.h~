@@ -1,0 +1,17 @@
+#include <stdio.h>
+#include <stdlib.h>
+
+typedef struct node{
+  struct node * next;
+  char * logEntry;
+}node;
+
+typedef struct LogQ{
+  node * head;
+  int size;
+  //lock
+}LogQ;
+
+LogQ * newLogQ();
+node * newNode();
+int addJob(char * entry);

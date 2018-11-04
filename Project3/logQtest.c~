@@ -1,0 +1,8 @@
+#include <stdio.h>
+#include "logQ.h"
+int main(int argc, char** argv){
+
+  printf("so far so good");
+  LogQ *logQ = newLogQ;
+  printf("made logQ! Current size: %d\n", logQ->size);
+}
