@@ -4,6 +4,14 @@
 #include "logQ.h"
 #include <string.h>
 
+
+/***************************************************************
+ *logQ is a threadsafe linked list to hold strings containing
+ *the results of the spellchecked requests. Code adapted
+ *from project1 Queue.
+ *NOTE NOT ALL methods are threadsafe.  Only those required for
+ *this assignment were adapted.
+ ***************************************************************/
 int workersActive = 0;
 
 Node* newNode(char* logEntry){
@@ -32,11 +40,10 @@ LogQ* newLogQ(){
 }
 
 /***************************************************************
- *push(Queue*, Event*) is a push method if implementing FIFO
- *Queue (cpuQue, disk_i queue). Push creates a new node to hold
- *event,  then inserts the node in last place (last place is
- *tracked by queue). If queue is empty, then node becomes first
- *element in queue.
+ *push(Queue*, entryToAdd*) is a synchronized push method, allowing
+ *multiple threads to write to it.  A lock is declared around the
+ *method, and elements are added inside the lock.  Once the element
+ *is the writer thread is signalled, and finally the lock is released.
  ***************************************************************/
 void push(LogQ* targetQ, char* entryToAdd){
     pthread_mutex_lock(&targetQ->lock);
@@ -53,7 +60,10 @@ void push(LogQ* targetQ, char* entryToAdd){
     pthread_mutex_unlock(&targetQ->lock);
 }
 /**********************************************************************
- Is empty returns yes if target Queue is empty
+ METHOD: isEmpty returns yes if target Queue is empty.
+ *WARNING: This method is strictly speaking, not threadsafe and in current
+ *implementation, method is private, only to be accessed from inside
+ *the lock.
  ***********************************************************************/
 int isEmpty(LogQ* logQ){
     return(logQ->size == 0);
@@ -61,6 +71,8 @@ int isEmpty(LogQ* logQ){
 
 /***************************************************************
  printQ iterates the queue, printing each element in order
+ *WARNING: printQ is not threadsafe, and should only be accessible
+ *from inside the logQ
  ***************************************************************/
 void printQ(LogQ* targetQ){
     if(!isEmpty(targetQ)){
@@ -74,16 +86,14 @@ void printQ(LogQ* targetQ){
 
 /***************************************************************
  pop(targetQueue) removes first element from queue, and returns it to user.
- **removeNode is called on the first node, and memory is deallocated for node **(but not event)**
- **returns NULL if targetQueue is empty.
+ *method first quires lock, and then proceeds to pop the next elemetn.
+ * if the targetQ is empty, (and we still have active workers) the
+ *thread sleeps on the condition.
  *****************************************************************/
 char* pop(LogQ* targetQ){
-    //TODO: add condition variable for remove from empty Q!!
     pthread_mutex_lock(&targetQ->lock);
     while(isEmpty(targetQ) && workersActive){
-       // printf("writer going to sleep on empty \n");
         pthread_cond_wait(&targetQ->fill, &targetQ->lock);
-       // printf("writer awake\n");
     }
     char* event = NULL;
     Node* nodeToBeRemoved;
@@ -101,6 +111,10 @@ char* pop(LogQ* targetQ){
 }
 
 /***************************************************************
+ METHOD: workersFinished aquires the lock, and sets the workersActive
+ *flag to 0.  It then signalls the fillbuffer, letting the writer
+ *(if sleeping) know there will be no new additions to logQ.
+ *The lock is then released. 
  ***************************************************************/
 void workersFinished(LogQ * logQ){
     pthread_mutex_lock(&logQ->lock);
@@ -116,6 +130,10 @@ void workersFinished(LogQ * logQ){
 void destroyLogQ(LogQ * targetQueue){
     while(!isEmpty(targetQueue)){
         pop(targetQueue);
+    }
+    int rc = pthread_mutex_destroy(&targetQueue->lock);
+    if (rc != 0 ){
+        printf("ERROR : logQ lock not destroyed!\n");
     }
     free(targetQueue);
 }

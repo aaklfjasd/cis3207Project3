@@ -12,6 +12,7 @@
 
 void *workerThr(void *arg);
 void *writerThr(void *arg);
+int initServer();
 int runServer();
 int stopServer();
 #endif /* server_h */

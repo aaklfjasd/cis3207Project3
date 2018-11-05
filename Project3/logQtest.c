@@ -3,7 +3,16 @@
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
-
+/****************************************************************
+ *************************LOG Q TEST ****************************
+ ****************************************************************
+ *Test for the jobQ.  Spawns 10 worker threads, and begins adding
+ *heap-allocated STRINGS to the logQ. The writer thread pops values
+ *from the logQ and frees them.  Then the main thread waits for all
+ *threads to complete after broadcasting it is no longer accepting
+ *connections. Upon completion, we check to make sure there is nothing
+ *left in the logQ (indicating error), and finally, we free the logQ.
+ ****************************************************************/
 char* strings[10] = {"a\n", "b\n", "c\n", "d\n", "e\n", "f\n", "g\n", "h\n", "i\n", "j\n"};
 LogQ *logQ;
 int workersRunning;
@@ -20,10 +29,11 @@ void *mythread(void *arg) {
 
 void *writerThr(void *arg){
     while(1){
-        //printf("Value popped from list : %s\n", pop(logQ));
-        if(pop(logQ) == NULL){
+        char* val = pop(logQ);
+        if(val == NULL){
             break;
         }
+        printf("Popped %s\n from the Q\n", val);
     }
     return 0;
 }
@@ -64,15 +74,4 @@ int main(int argc, char** argv){
         }
         destroyLogQ(logQ);
     }
-    
-    /* push(logQ, s1);
-     printQ(logQ);
-     printf("added entry logQ! Current size: %d\n", logQ->size);
-     s1 = strdup("oh what a underful world\n");
-     push(logQ, s1);
-     printQ(logQ);
-     printf("Printing popped string: %s\n", pop(logQ));
-     destroyLogQ(logQ);
-     printf("successfully destroyed Q\n");
-     */
 }

@@ -10,6 +10,19 @@
 #include <pthread.h>
 
 #define PORT 1024
+/******************************************************
+ *clientdemo is simply a test driver for the server.
+ *clientdemo runs, first initializing the dictionary
+ *with the default dictionary.  The client then creates
+ *20 threads, each of which establishes a new connection
+ *with the server, and sends a random word (USES ARC4RANDOM)
+ * in the dictionary.  The server responds with (OK) the
+ *socket is closed, and the thread repeats this process
+ *20 times.  We verify proper operation from the server
+ *end.  For each running of clientdemo, the server should
+ *add a line in the logfile.  Wordcount on the lines of
+ *logfile verifies correctness.
+ ******************************************************/
 
 char** dictionary;
 int length;
@@ -37,6 +50,7 @@ void initDictionary(){
 }
 /*******************************************************
  *METHOD destroyDictionary
+ *ITERATES dictionary, freeing allocated memory
  *******************************************************/
 void destroyDictionary(){
     int i;
@@ -46,6 +60,15 @@ void destroyDictionary(){
     free(dictionary);
 }
 
+/*******************************************************
+ *METHOD clientThread LOOPS 10 times doing the following:
+ 
+ *1. Establishes connected siocket with the server
+ *2. chooses a random word in the dictionary
+ *3. Sends word to the socket
+ *4. Recieves response, printing to teh screen
+ *5. closes socket.
+ *******************************************************/
 void *clientThr(void *arg){
     //CLIENTDEMO
     
@@ -56,7 +79,7 @@ void *clientThr(void *arg){
     //close connection
     int i;
     for(i = 0; i < 10; i++){
-        printf("starting client socket!\n");
+        //printf("starting client socket!\n");
         sleep(1);
         
         struct sockaddr_in address;
@@ -65,7 +88,7 @@ void *clientThr(void *arg){
         int randomIndex = arc4random_uniform(length);
         char *hello;
         hello = dictionary[randomIndex];
-        printf("word: %s\n", dictionary[randomIndex]);
+        //printf("word: %s\n", dictionary[randomIndex]);
         char buffer[1024] = {0};
         if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
         {
@@ -91,32 +114,50 @@ void *clientThr(void *arg){
             return 0;
         }
         valread = read(sock, buffer, 1024);
-        buffer[valread] = '\0';
-        printf("readFromSocket: %s\n", buffer);
-        
-        send(sock , hello , strlen(hello) , 0 );
-        valread = read(sock, buffer, 1024);
-        buffer[valread] = '\0';
-        printf("readFromSocket: %s\n", buffer);
-        printf("closing client Socket !\n");
+        if(valread < 0){
+            printf("ERROR reading from socket\n");
+            
+        } else if(valread == 0){
+            printf("socket closed by server\n");
+        }else{
+            buffer[valread] = '\0';
+            //printf("readFromSocket: %s\n", buffer);
+            send(sock , hello , strlen(hello) , 0 );
+            valread = read(sock, buffer, 1024);
+            if(valread < 0){
+                printf("ERROR reading from socket\n");
+            }
+            else if(valread == 0){
+                printf("socket closed by server\n");
+            }else{
+                buffer[valread] = '\0';
+                printf("readFromSocket: %s\n", buffer);
+            }
+        }
         close(sock);
     }
     return 0;
 }
 
+/*******************************************************
+ *METHOD main
+ *First initialzies dictionary, and then creates 20 threads.
+ *main waits for all threads to complete, and destroys
+ *dictionary
+ *******************************************************/
 int main(int argc, char const *argv[])
 {
     initDictionary();
     printf("INITED DICTIONARY\n");
-    pthread_t clientThread[20];
+    pthread_t clientThread[10];
     int j;
     
-    for(j = 0; j < 20; j++){
+    for(j = 0; j < 10; j++){
         pthread_create(&clientThread[j], NULL, clientThr, NULL);
         
     }
     
-    for(j = 0; j < 20; j++){
+    for(j = 0; j < 10; j++){
         pthread_join(clientThread[j], NULL);
     }
     

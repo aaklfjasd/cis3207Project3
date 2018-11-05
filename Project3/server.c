@@ -9,35 +9,27 @@
 #include <unistd.h>
 #include "logQ.h"
 #include "open_listenfd.h"
-#define BUF_LEN 512
+#include "dictionary.h"
 
-char** dictionary;
-int length;
+#define BUF_LEN 512
+#define DEFAULT_PORT 1024
+#define DEFAULT_DICTIONARY "words.txt"
+#define NUM_WORKERS 30
+
+//Variables for server
 JobQ *jobQ;
 LogQ *logQ;
 pthread_t writerThread;
-pthread_t workerThread[10];
+pthread_t workerThread[NUM_WORKERS];
 int acceptingConnections;
 int workersActive;
 int connectionSocket,clientSocket, connectionPort;
 
+/*idFactory is only accessed by accessing idLock.  It
+ is accessed once by worker threads as they are created*/
+pthread_mutex_t idLock;
+int idFactory;
 
-/***********************************************************
- *METHOD : lookupWord uses binary search to locate the word
- *INPUT: string
- *OUTPUT: int: 1 if word is in dictionary, 0 else
- ***********************************************************/
-int lookupWord(char* word){
-    int result = 0;
-    int i;
-    for(i = 0; i < length; i++){
-        if(strcmp(word, dictionary[i]) == 0){
-            result = 1;
-            break;
-        }
-    }
-    return result;
-}
 /***********************************************************
  METHOD: workerThr: method contains logic for each worker thread.
  INPUT: threadID: integer used to identify thread
@@ -47,6 +39,12 @@ int lookupWord(char* word){
  *the Q is empty,
  ***********************************************************/
 void *workerThr(void *arg){
+    int id;
+    pthread_mutex_lock(&idLock);
+    id = idFactory;
+    idFactory++;
+    pthread_mutex_unlock(&idLock);
+    
     while(1){
         int bytesReturned;
         char recvBuffer[BUF_LEN];
@@ -59,10 +57,9 @@ void *workerThr(void *arg){
         char* msgOk = " OK";
         char* msgWrong = " MISSPELLED";
         char* msgHandledBy = "-by worker_id: ";
-        char* msgPrompt = ">>>";
+        // char* msgPrompt = ">>>";
         char* msgError = "Word not recieved. ):\n";
         //OUTER LOOP
-        //printf("Value popped from list : %s\n", pop(logQ));
         int *i = jobPop(jobQ);
         if(i == NULL){
             break;
@@ -74,17 +71,19 @@ void *workerThr(void *arg){
             //how many bytes we received.
             bytesReturned = recv(clientSocket, recvBuffer, BUF_LEN, 0);
             
-            int s;
-            for(s = 0; s < bytesReturned; s++){
-                if(recvBuffer[s] == '\r' || recvBuffer[s] == '\n'){
-                    recvBuffer[s] = '\0';
-                }
-            }
-            
             //Make sure the message was recieved, if not report error
             if(bytesReturned == -1){
-                send(clientSocket, msgError, strlen(msgError), 0);
-            } else{
+                printf("error getting bytes\n");
+                //send(clientSocket, msgError, strlen(msgError), 0);
+            } else if(bytesReturned == 0){
+                printf("client closed Socket\n");
+            }else{
+                int s;
+                for(s = 0; s < bytesReturned; s++){
+                    if(recvBuffer[s] == '\r' || recvBuffer[s] == '\n'){
+                        recvBuffer[s] = '\0';
+                    }
+                }
                 
                 msgResponse = strdup(recvBuffer);
                 char logEntry[75] = {'\0'};
@@ -96,9 +95,9 @@ void *workerThr(void *arg){
                     strcat(logEntry, msgWrong);
                 }
                 send(clientSocket, logEntry, strlen(logEntry), 0);
-                int length = snprintf(NULL, 0,"%d", *i);
+                int length = snprintf(NULL, 0,"%d", id);
                 char string[length*sizeof(char) + 1];
-                sprintf(string, "%d", *i);
+                sprintf(string, "%d", id);
                 strcat(logEntry, msgHandledBy);
                 strcat(logEntry ,string);
                 free(msgResponse);
@@ -112,7 +111,10 @@ void *workerThr(void *arg){
 }
 
 /*******************************************************
- *METHOD writerThr:
+ *METHOD writerThr: controls threadlogic for writer.  The thread
+ *is created, and repeatedly pops values from the logQ.
+ *once it gets a value, it writes it to the logfile, and
+ *frees the memory allocated ot the string.
  *******************************************************/
 void *writerThr(void *arg){
     FILE * logfile = fopen("logfile.txt", "w+");
@@ -136,46 +138,12 @@ void *writerThr(void *arg){
 
 
 /*******************************************************
- METHOD: initDictionary: inits dictionary values .
- *if unable to load dictionary, loads from standard
- *******************************************************/
-
-void initDictionary(){
-    FILE *dictFile = fopen("words.txt", "r");
-    char word[50];
-    int counter = 0;
-    
-    while(fgets(word, 50, dictFile)!= NULL){
-        counter++;
-    }
-    length = counter;
-    dictionary = malloc(length*sizeof(char*));
-    fclose(dictFile);
-    dictFile = fopen("words.txt", "r");
-    
-    int i;
-    for(i = 0; i < length; i++){
-        if(fgets(word, 50, dictFile)){
-            int j;
-            for(j = strlen(word); j >0; j--){
-                if(word[j] == '\n'){
-                    word[j] = '\0';
-                    break;
-                }
-            }
-            dictionary[i] = strdup(word);
-        }
-    }
-    fclose(dictFile);
-}
-
-/*******************************************************
  METHOD: initServer: inits server values creates threads
  *to handle server logic.  IF initialized correctly, we
  *return 0, else, we return -1.
  *******************************************************/
 int initServer(int argc, char** argv){
-    initDictionary();
+    initDictionary(argc, argv);
     acceptingConnections = 1;
     jobQ = newJobQ();
     logQ = newLogQ();
@@ -184,20 +152,36 @@ int initServer(int argc, char** argv){
     //VERIFY we have a port number IF not use default 1024
     //TODO: setup default 1024 port
     if(argc == 1){
-        printf("No port number entered.\n");
-        return -1;
-    }
-    connectionPort = atoi(argv[1]);
-    //VERIFY user port was a valid port, IF NOT use default
-    if(connectionPort < 1024 || connectionPort > 65535){
-        printf("Port number is either too low(below 1024), or too high(above 65535).\n");
-        return -1;
+        printf("No port number entered. Using default port.\n");
+        connectionPort = DEFAULT_PORT;
+        //return -1;
+    }else if(argc == 2){
+        connectionPort = atoi(argv[1]);
+        //VERIFY user port was a valid port, IF NOT use default
+        if(connectionPort < 1024 || connectionPort > 65535){
+            printf("USING DEFAULT_PORT %d\n", DEFAULT_PORT);
+            connectionPort = DEFAULT_PORT;
+        }
+    }else if(argc == 3){
+        connectionPort = atoi(argv[1]);
+        if(connectionPort < 1024 || connectionPort > 65535){
+            connectionPort = atoi(argv[2]);
+            if(connectionPort < 1024 || connectionPort > 65535){
+                printf("USING DEFAULT_PORT %d\n", DEFAULT_PORT);
+                connectionPort = DEFAULT_PORT;
+            }
+        }
     }
     
+    idFactory = 0;
+    rc = pthread_mutex_init(&idLock, NULL);
+    if (rc != 0){
+        printf("idLock not initialized!\n");
+        return -1;
+    }
     //CREATE NUM_WORKERS threads to work on the server
     //TODO: CREATE constant to specify number of workers
-    for(i = 0; i < 10; i++){
-        //create user id arg to send to thread
+    for(i = 0; i < NUM_WORKERS; i++){
         //create threads set to run workers method
         if((rc = pthread_create(&workerThread[i], NULL, workerThr, NULL))!=0){
             printf("Unable to create worker threads\n");
@@ -222,7 +206,11 @@ int initServer(int argc, char** argv){
 
 
 /*******************************************************
- METHOD: runServer:
+ METHOD: runServer: Begins the server loop.
+ *it listens on the socket.  When a client connects
+ *the server allocates space on the socket, and
+ *adds the socket to the jobQ. It continues this loop
+ *until interrupted upon close.
  *******************************************************/
 int runServer(int argc, char** argv){
     //sockaddr_in holds information about the user connection.
@@ -254,18 +242,12 @@ int runServer(int argc, char** argv){
 }
 
 /*******************************************************
- *METHOD destroyDictionary
- *******************************************************/
-void destroyDictionary(){
-    int i;
-    for(i = 0; i < length; i++){
-        free(dictionary[i]);
-    }
-    free(dictionary);
-}
-
-/*******************************************************
- *METHOD stopServer:
+ *METHOD stopServer: The stopserver method is responsible
+ *for shutting down the server and all allocated memory to
+ *the server.  If stopserver is called, we wait for all threads
+ *to join, and let deallocate all memory associated with the
+ *logQ and jobQ.  We close the listening socket, and
+ *deallocate all space allocated to dictionary.
  *******************************************************/
 int stopServer(){
     ///////KILL THE SERVER DAWG
@@ -275,7 +257,7 @@ int stopServer(){
     printf("signalling jobQ\n");
     serverFinished(jobQ);
     int i;
-    for(i = 0; i < 10; i++){
+    for(i = 0; i < NUM_WORKERS; i++){
         pthread_join(workerThread[i], NULL);
     }
     printf("Worker threads finished \n");
@@ -293,8 +275,15 @@ int stopServer(){
     }
     destroyLogQ(logQ);
     close(connectionSocket);
-    destroyDictionary();
     printf("socket closed!\n");
+    destroyDictionary();
+    int rc = pthread_mutex_destroy(&idLock);
+    if(rc !=0){
+        printf("ERROR: idLock NOT destroyed!\n");
+    }
+    else{
+        printf("idLock destroyed!\n");
+    }
     printf("Exiting normally!\n");
     return 0;
 }
