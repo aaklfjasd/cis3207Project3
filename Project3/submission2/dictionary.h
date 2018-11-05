@@ -9,6 +9,7 @@
 #define dictionary_h
 
 #include <stdio.h>
+int cmpfunc(const void * a, const void * b);
 void initDictionary(int argc, char** argv);
 void destroyDictionary();
 int lookupWord(char* word);

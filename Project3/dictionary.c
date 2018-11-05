@@ -6,6 +6,7 @@
 
 char **dictionary;
 int length;
+
 /*******************************************************
  METHOD: initDictionary: inits dictionary values .
  *if unable to load dictionary, loads from DEFAULT_DICTIONARY.
@@ -72,6 +73,10 @@ void initDictionary(int argc, char** argv){
         }
     }
     fclose(dictFile);
+    qsort(dictionary, length, sizeof(char*), cmpfunc);
+    for(i = 0; i < length; i++){
+        printf("%d: %s\n", i, dictionary[i]);
+    }
 }
 
 /*******************************************************
@@ -109,4 +114,9 @@ int lookupWord(char* word){
         }
     }
     return 0;
+}
+
+//cmpfunc is a wrapper function for qsort.
+int cmpfunc(const void * a, const void * b){
+    return strcmp(*((char**) a), *((char**) b));
 }

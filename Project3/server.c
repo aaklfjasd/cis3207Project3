@@ -57,6 +57,7 @@ void *workerThr(void *arg){
         char* msgOk = " OK";
         char* msgWrong = " MISSPELLED";
         char* msgHandledBy = "-by worker_id: ";
+        char* msgClose = "Goodbye!\n";
         // char* msgPrompt = ">>>";
         char* msgError = "Word not recieved. ):\n";
         //OUTER LOOP
@@ -66,42 +67,56 @@ void *workerThr(void *arg){
         }
         else{
             clientSocket = *i;
-            send(clientSocket, msgRequest, strlen(msgRequest), 0);
-            //recv() will store the message from the user in the buffer, returning
-            //how many bytes we received.
-            bytesReturned = recv(clientSocket, recvBuffer, BUF_LEN, 0);
             
-            //Make sure the message was recieved, if not report error
-            if(bytesReturned == -1){
-                printf("error getting bytes\n");
-                //send(clientSocket, msgError, strlen(msgError), 0);
-            } else if(bytesReturned == 0){
-                printf("client closed Socket\n");
-            }else{
-                int s;
-                for(s = 0; s < bytesReturned; s++){
-                    if(recvBuffer[s] == '\r' || recvBuffer[s] == '\n'){
-                        recvBuffer[s] = '\0';
+            //INNER LOOP continues the session until the user sends esc!
+            while(1){
+                send(clientSocket, msgRequest, strlen(msgRequest), 0);
+                //recv() will store the message from the user in the buffer, returning
+                //how many bytes we received.
+                bytesReturned = recv(clientSocket, recvBuffer, BUF_LEN, 0);
+                
+                //Make sure the message was recieved, if not report error
+                if(bytesReturned == -1){
+                    printf("error getting bytes\n");
+                    //send(clientSocket, msgError, strlen(msgError), 0);
+                    break;
+                } else if(bytesReturned == 0){
+                    printf("client closed Socket\n");
+                    break;
+                }else if(recvBuffer[0] == 27){
+                    //we should close!
+                    send(clientSocket, msgClose, strlen(msgClose), 0);
+                    break;
+                }else{
+                    int s;
+                    //REMOVE \n character
+                    for(s = 0; s < bytesReturned; s++){
+                        if(recvBuffer[s] == '\r' || recvBuffer[s] == '\n'){
+                            recvBuffer[s] = '\0';
+                        }
                     }
+                    //write whether user was correct
+                    msgResponse = strdup(recvBuffer);
+                    char logEntry[75] = {'\0'};
+                    strcat(logEntry, msgResponse);
+                    
+                    if(lookupWord(logEntry)){
+                        strcat(logEntry, msgOk);
+                    } else{
+                        strcat(logEntry, msgWrong);
+                    }
+                    send(clientSocket, logEntry, strlen(logEntry), 0);
+                    send(clientSocket, "\n", 2, 0);
+                    
+                    //Prepeare log entry, and push to logQ
+                    int length = snprintf(NULL, 0,"%d", id);
+                    char string[length*sizeof(char) + 1];
+                    sprintf(string, "%d", id);
+                    strcat(logEntry, msgHandledBy);
+                    strcat(logEntry ,string);
+                    free(msgResponse);
+                    push(logQ, logEntry);
                 }
-                
-                msgResponse = strdup(recvBuffer);
-                char logEntry[75] = {'\0'};
-                strcat(logEntry, msgResponse);
-                
-                if(lookupWord(logEntry)){
-                    strcat(logEntry, msgOk);
-                } else{
-                    strcat(logEntry, msgWrong);
-                }
-                send(clientSocket, logEntry, strlen(logEntry), 0);
-                int length = snprintf(NULL, 0,"%d", id);
-                char string[length*sizeof(char) + 1];
-                sprintf(string, "%d", id);
-                strcat(logEntry, msgHandledBy);
-                strcat(logEntry ,string);
-                free(msgResponse);
-                push(logQ, logEntry);
             }
             close(clientSocket);
             free(i);
@@ -161,8 +176,11 @@ int initServer(int argc, char** argv){
         if(connectionPort < 1024 || connectionPort > 65535){
             printf("USING DEFAULT_PORT %d\n", DEFAULT_PORT);
             connectionPort = DEFAULT_PORT;
+        } else{
+            printf("USING Port: %d\n", connectionPort);
         }
     }else if(argc == 3){
+        //SAME as above but checks both args for valid port number
         connectionPort = atoi(argv[1]);
         if(connectionPort < 1024 || connectionPort > 65535){
             connectionPort = atoi(argv[2]);
@@ -171,8 +189,9 @@ int initServer(int argc, char** argv){
                 connectionPort = DEFAULT_PORT;
             }
         }
+        printf("Connecting on PORT %d\n", connectionPort);
     }
-    
+    //Set up FACTORY for worker ids
     idFactory = 0;
     rc = pthread_mutex_init(&idLock, NULL);
     if (rc != 0){
@@ -231,12 +250,13 @@ int runServer(int argc, char** argv){
                 printf("Error connecting to client.\n");
                 return -1;
             }
+            //IF we connect, push the socket to the jobQ
             printf("Connection success!\n");
             int *arg = malloc(sizeof(*arg));
             *arg = clientSocket;
             jobPush(jobQ, arg);
         }
-        printf("server exited while loop \n");
+        printf("server no longer accepting connections.\n");
         return 0;
     }
 }
