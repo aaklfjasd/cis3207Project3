@@ -1,0 +1,2 @@
+serverdemo: serverdemo.c server.c logQ.c jobQ.c open_listenfd.c dictionary.c
+	gcc -o serverdemo serverdemo.c server.c logQ.c jobQ.c open_listenfd.c dictionary.c -lpthread
